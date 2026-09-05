@@ -57,7 +57,7 @@ function renderPlayerName() {
   if (!display) return;
   const playerName = localStorage.getItem(PLAYER_KEY);
   if (playerName) {
-    display.textContent = `Player: ${playerName}`;
+    display.textContent = `${playerName}`;
   }
 }
 
