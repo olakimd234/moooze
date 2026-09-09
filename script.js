@@ -20,13 +20,17 @@ function getApiBase() {
   const h = window.location.hostname.toLowerCase();
   const isLocal =
     h === 'localhost' || h === '127.0.0.1' || h === '::1' ||
-    h.endsWith('.local') || h.includes('ngrok');
+    h.endsWith('.local') || h.includes('ngrok') ||
+    window.location.protocol === 'file:';
   if (isLocal) {
     return window.location.port ? window.location.origin
          : h.includes('ngrok')  ? window.location.origin
          : 'http://127.0.0.1:5000';
   }
-  return 'http://judewarmauth.onrender.com'; // ← replace with your Render URL
+  // In production, Flask serves the HTML and the API from the SAME origin.
+  // Using window.location.origin means no hardcoded URL is ever needed —
+  // it works on any domain automatically.
+  return window.location.origin;
 }
 
 const API_BASE       = getApiBase();
